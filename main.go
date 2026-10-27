@@ -36,49 +36,34 @@ func main() {
 	wg := sync.WaitGroup{}
 	wg.Add(MAX_GOROUTINES)
 
-	results := make(chan int, n)
-	tasks := make(chan string, n)
-	for range n {
-		tasks <- parsedURL.String()
-	}
-	close(tasks)
+	results := make(chan int, 5)
+	tasks := make(chan string, 5)
+
+	go func() {
+		for range n {
+			tasks <- parsedURL.String()
+		}
+		close(tasks)
+	}()
 
 	for range MAX_GOROUTINES {
-		go pingURL2(&wg, tasks, results)
+		go func() {
+			pingURL2(tasks, results)
+			wg.Done()
+		}()
 	}
 
 	go func() {
 		wg.Wait()
 		close(results)
 	}()
+
 	for r := range results {
 		fmt.Println(r)
 	}
 }
 
-func pingURL(wg *sync.WaitGroup, mu *sync.Mutex, tasks *int, u string) int {
-	defer wg.Done()
-	mu.Lock()
-	if *tasks > 0 {
-		*tasks--
-		mu.Unlock()
-
-		client := getHttpClient()
-
-		resp, err := client.Get(u)
-		if err != nil {
-			fmt.Printf("error occured: %v\n", err)
-			return -1
-		}
-		fmt.Println(resp.StatusCode)
-		return resp.StatusCode
-	}
-	mu.Unlock()
-	return -1
-}
-
-func pingURL2(wg *sync.WaitGroup, tasks chan string, results chan int) int {
-	defer wg.Done()
+func pingURL2(tasks chan string, results chan int) {
 	client := getHttpClient()
 
 	for t := range tasks {
@@ -89,15 +74,6 @@ func pingURL2(wg *sync.WaitGroup, tasks chan string, results chan int) int {
 		}
 		results <- resp.StatusCode
 		resp.Body.Close()
-	}
-
-	return -1
-}
-
-func printFlags(wg *sync.WaitGroup, flags ...any) {
-	defer wg.Done()
-	for _, f := range flags {
-		fmt.Println(f)
 	}
 }
 
