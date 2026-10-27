@@ -16,6 +16,10 @@ const (
 	DEFAULT_URL    = "https://www.example.com"
 )
 
+var (
+	httpClient = &http.Client{Timeout: 30 * time.Second}
+)
+
 func main() {
 	l := log.Default()
 	var rawURL string
@@ -48,7 +52,7 @@ func main() {
 
 	for range MAX_GOROUTINES {
 		go func() {
-			pingURL(tasks, results)
+			worker(tasks, results)
 			wg.Done()
 		}()
 	}
@@ -63,20 +67,22 @@ func main() {
 	}
 }
 
-func pingURL(tasks chan string, results chan int) {
-	client := getHttpClient()
-
+func worker(tasks chan string, results chan int) {
 	for t := range tasks {
-		resp, err := client.Get(t)
+		code, err := getStatusCode(t)
 		if err != nil {
-			fmt.Printf("error in goroutine: %v\n", err)
+			fmt.Printf("worker failed for task: %v error: %v\n", t, err)
 			continue
 		}
-		results <- resp.StatusCode
-		resp.Body.Close()
+		results <- code
 	}
 }
 
-func getHttpClient() *http.Client {
-	return &http.Client{Timeout: 30 * time.Second}
+func getStatusCode(url string) (int, error) {
+	resp, err := httpClient.Get(url)
+	if err != nil {
+		return -1, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, nil
 }
