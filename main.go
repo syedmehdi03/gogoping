@@ -48,7 +48,7 @@ func main() {
 
 	for range MAX_GOROUTINES {
 		go func() {
-			pingURL2(tasks, results)
+			pingURL(tasks, results)
 			wg.Done()
 		}()
 	}
@@ -63,7 +63,7 @@ func main() {
 	}
 }
 
-func pingURL2(tasks chan string, results chan int) {
+func pingURL(tasks chan string, results chan int) {
 	client := getHttpClient()
 
 	for t := range tasks {
