@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	MAX_GOROUTINES = 50
+	MAX_GOROUTINES = 5
 	DEFAULT_N      = 1
 	DEFAULT_URL    = "https://www.example.com"
 )
@@ -20,7 +20,14 @@ var (
 	httpClient = &http.Client{Timeout: 30 * time.Second}
 )
 
+type Response struct {
+	Status    int
+	Err       error
+	TimeTaken time.Duration
+}
+
 func main() {
+	now := time.Now()
 	l := log.Default()
 	var rawURL string
 	var n int
@@ -29,23 +36,20 @@ func main() {
 	flag.IntVar(&n, "n", DEFAULT_N, "N describes the number of times requests are made to the specified URL")
 	flag.Parse()
 
-	parsedURL, err := url.ParseRequestURI(rawURL)
+	parsedURL, n, err := validateFlags(rawURL, n)
 	if err != nil {
-		l.Fatalf("invalid url")
-	}
-	if n < 1 {
-		l.Fatalf("N must be greater than 0")
+		l.Fatal(err)
 	}
 
 	wg := sync.WaitGroup{}
 	wg.Add(MAX_GOROUTINES)
 
-	results := make(chan int, 5)
+	results := make(chan Response, 5)
 	tasks := make(chan string, 5)
 
 	go func() {
 		for range n {
-			tasks <- parsedURL.String()
+			tasks <- parsedURL
 		}
 		close(tasks)
 	}()
@@ -61,20 +65,30 @@ func main() {
 		wg.Wait()
 		close(results)
 	}()
-
 	for r := range results {
-		fmt.Println(r)
+		fmt.Printf("Status code: %v | Error: %v | TimeTaken: %v\n", r.Status, r.Err, r.TimeTaken)
 	}
+
+	fmt.Printf("Total time: %v", time.Since(now))
 }
 
-func worker(tasks chan string, results chan int) {
+func worker(tasks chan string, results chan Response) {
 	for t := range tasks {
+		start := time.Now()
 		code, err := getStatusCode(t)
+		elapsed := time.Since(start)
+
 		if err != nil {
-			fmt.Printf("worker failed for task: %v error: %v\n", t, err)
+			results <- Response{
+				Err:       err,
+				TimeTaken: elapsed,
+			}
 			continue
 		}
-		results <- code
+		results <- Response{
+			Status:    code,
+			TimeTaken: elapsed,
+		}
 	}
 }
 
@@ -85,4 +99,15 @@ func getStatusCode(url string) (int, error) {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode, nil
+}
+
+func validateFlags(rawURL string, n int) (string, int, error) {
+	parsedURL, err := url.ParseRequestURI(rawURL)
+	if err != nil {
+		return "", 0, fmt.Errorf("invalid URL")
+	}
+	if n < 1 {
+		return "", 0, fmt.Errorf("N must be greater than 1")
+	}
+	return parsedURL.String(), n, nil
 }
