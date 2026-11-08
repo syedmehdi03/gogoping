@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"sync"
 	"time"
 )
 
@@ -20,14 +19,33 @@ var (
 	httpClient = &http.Client{Timeout: 30 * time.Second}
 )
 
-type Response struct {
-	Status    int
-	Err       error
-	TimeTaken time.Duration
+type PingURLTask struct {
+	URL        string
+	StatusCode int
+	Err        error
+}
+
+func NewPingURLTask(url string) PingURLTask {
+	return PingURLTask{
+		URL: url,
+	}
+}
+
+func (p PingURLTask) Process() Task {
+	t := PingURLTask{
+		URL: p.URL,
+	}
+	resp, err := httpClient.Get(t.URL)
+	if err != nil {
+		t.Err = err
+		return t
+	}
+	defer resp.Body.Close()
+	t.StatusCode = resp.StatusCode
+	return t
 }
 
 func main() {
-	now := time.Now()
 	l := log.Default()
 	var rawURL string
 	var n int
@@ -41,64 +59,23 @@ func main() {
 		l.Fatal(err)
 	}
 
-	wg := sync.WaitGroup{}
-	wg.Add(MAX_GOROUTINES)
+	queue := NewQueueClient(10, 10, MAX_GOROUTINES)
 
-	results := make(chan Response, 5)
-	tasks := make(chan string, 5)
-
+	queue.AddToProducer()
 	go func() {
+		defer queue.ProducerDone()
 		for range n {
-			tasks <- parsedURL
+			newTask := NewPingURLTask(parsedURL)
+			queue.EnQueue(newTask)
 		}
-		close(tasks)
 	}()
 
-	for range MAX_GOROUTINES {
-		go func() {
-			worker(tasks, results)
-			wg.Done()
-		}()
+	queue.Run()
+
+	for r := range queue.GetResults() {
+		res := r.(PingURLTask)
+		fmt.Printf("Status code: %v | Error: %v\n", res.StatusCode, res.Err)
 	}
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-	for r := range results {
-		fmt.Printf("Status code: %v | Error: %v | TimeTaken: %v\n", r.Status, r.Err, r.TimeTaken)
-	}
-
-	fmt.Printf("Total time: %v", time.Since(now))
-}
-
-func worker(tasks chan string, results chan Response) {
-	for t := range tasks {
-		start := time.Now()
-		code, err := getStatusCode(t)
-		elapsed := time.Since(start)
-
-		if err != nil {
-			results <- Response{
-				Err:       err,
-				TimeTaken: elapsed,
-			}
-			continue
-		}
-		results <- Response{
-			Status:    code,
-			TimeTaken: elapsed,
-		}
-	}
-}
-
-func getStatusCode(url string) (int, error) {
-	resp, err := httpClient.Get(url)
-	if err != nil {
-		return -1, err
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode, nil
 }
 
 func validateFlags(rawURL string, n int) (string, int, error) {
